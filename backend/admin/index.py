@@ -17,6 +17,8 @@ def db():
 
 
 def get_admin(cur, token):
+    if not token:
+        return None
     cur.execute(
         "SELECT u.* FROM users u JOIN sessions s ON s.user_id = u.id "
         "WHERE s.token = %s AND s.expires_at > NOW()", (token,))
@@ -27,7 +29,7 @@ def get_admin(cur, token):
 
 
 def handler(event: dict, context) -> dict:
-    '''Административная панель: управление игроками, балансом, ролями и турнирами. Только для админов.'''
+    '''Административная панель Irrelevant Kazino: бан, баланс, роли, турниры, статистика.'''
     method = event.get('httpMethod', 'GET')
     if method == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS, 'body': ''}
@@ -50,55 +52,80 @@ def handler(event: dict, context) -> dict:
                 if q:
                     like = '%' + q + '%'
                     cur.execute(
-                        "SELECT id, email, nickname, balance, role, is_owner, vip_level, level, "
-                        "total_wagered, total_won, games_played, created_at FROM users "
-                        "WHERE LOWER(email) LIKE %s OR LOWER(nickname) LIKE %s ORDER BY id LIMIT 100",
-                        (like, like))
+                        "SELECT id, player_id, email, nickname, balance, role, is_owner, is_banned, "
+                        "vip_level, level, total_wagered, total_won, games_played, created_at FROM users "
+                        "WHERE LOWER(email) LIKE %s OR LOWER(nickname) LIKE %s OR player_id LIKE %s "
+                        "ORDER BY id LIMIT 100",
+                        (like, like, like))
                 else:
                     cur.execute(
-                        "SELECT id, email, nickname, balance, role, is_owner, vip_level, level, "
-                        "total_wagered, total_won, games_played, created_at FROM users ORDER BY id LIMIT 100")
+                        "SELECT id, player_id, email, nickname, balance, role, is_owner, is_banned, "
+                        "vip_level, level, total_wagered, total_won, games_played, created_at "
+                        "FROM users ORDER BY id LIMIT 100")
                 rows = cur.fetchall()
                 for r in rows:
                     r['created_at'] = r['created_at'].isoformat() if r['created_at'] else None
                 return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'users': rows})}
+
             if action == 'overview':
                 cur.execute("SELECT COUNT(*) c FROM users")
                 total = cur.fetchone()['c']
-                cur.execute("SELECT COALESCE(SUM(balance),0) s FROM users")
+                cur.execute("SELECT COUNT(*) c FROM users WHERE is_banned=TRUE")
+                banned = cur.fetchone()['c']
+                cur.execute("SELECT COALESCE(SUM(balance),0) s FROM users WHERE is_banned=FALSE")
                 circ = cur.fetchone()['s']
                 cur.execute("SELECT COUNT(*) c FROM game_history")
                 games = cur.fetchone()['c']
                 cur.execute("SELECT COALESCE(SUM(bet),0) b, COALESCE(SUM(payout),0) p FROM game_history")
                 gg = cur.fetchone()
                 return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({
-                    'total_users': total, 'circulating': int(circ), 'total_games': games,
+                    'total_users': total, 'banned_users': banned,
+                    'circulating': int(circ), 'total_games': games,
                     'total_bet': int(gg['b']), 'total_payout': int(gg['p'])})}
+
             return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'unknown'})}
 
         body = json.loads(event.get('body') or '{}')
         act = body.get('action')
         target_id = body.get('user_id')
 
-        if act == 'set_balance':
-            amount = int(body.get('balance', 0))
-            cur.execute("UPDATE users SET balance=%s WHERE id=%s", (amount, target_id))
-            cur.execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s,%s,%s,%s)",
-                        (target_id, amount, 'admin', 'Изменение баланса админом'))
-            conn.commit()
-            return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'ok': True})}
-
         if act == 'add_balance':
             amount = int(body.get('amount', 0))
-            cur.execute("UPDATE users SET balance=balance+%s WHERE id=%s RETURNING balance", (amount, target_id))
-            newbal = cur.fetchone()
+            cur.execute("UPDATE users SET balance=balance+%s WHERE id=%s RETURNING balance, nickname", (amount, target_id))
+            row = cur.fetchone()
             cur.execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s,%s,%s,%s)",
                         (target_id, amount, 'topup', 'Начисление Plazma (обмен в ТГ)'))
             conn.commit()
-            return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'ok': True, 'balance': newbal['balance']})}
+            return {'statusCode': 200, 'headers': CORS, 'body': json.dumps(
+                {'ok': True, 'balance': row['balance'], 'nickname': row['nickname']})}
+
+        if act == 'sub_balance':
+            amount = int(body.get('amount', 0))
+            cur.execute("SELECT balance FROM users WHERE id=%s", (target_id,))
+            row = cur.fetchone()
+            if not row:
+                return {'statusCode': 404, 'headers': CORS, 'body': json.dumps({'error': 'Не найден'})}
+            new_bal = max(0, row['balance'] - amount)
+            cur.execute("UPDATE users SET balance=%s WHERE id=%s RETURNING balance", (new_bal, target_id))
+            nb = cur.fetchone()
+            cur.execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s,%s,%s,%s)",
+                        (target_id, -amount, 'admin_sub', 'Снятие баланса админом'))
+            conn.commit()
+            return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'ok': True, 'balance': nb['balance']})}
+
+        if act == 'set_ban':
+            if admin['is_owner'] is False and not admin['role'] == 'admin':
+                return {'statusCode': 403, 'headers': CORS, 'body': json.dumps({'error': 'Нет прав'})}
+            cur.execute("SELECT is_owner FROM users WHERE id=%s", (target_id,))
+            tgt = cur.fetchone()
+            if tgt and tgt['is_owner']:
+                return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'Нельзя банить владельца'})}
+            banned = bool(body.get('banned', True))
+            cur.execute("UPDATE users SET is_banned=%s WHERE id=%s", (banned, target_id))
+            conn.commit()
+            return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'ok': True, 'banned': banned})}
 
         if act == 'set_role':
-            # Только владелец может менять роли
             if not admin['is_owner']:
                 return {'statusCode': 403, 'headers': CORS, 'body': json.dumps({'error': 'Только владелец выдаёт админку'})}
             role = body.get('role')

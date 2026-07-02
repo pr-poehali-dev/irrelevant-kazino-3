@@ -2,15 +2,18 @@ const AUTH_URL = 'https://functions.poehali.dev/3e65a5be-2e7c-4130-9849-256631ae
 const GAME_URL = 'https://functions.poehali.dev/adaf94b6-465a-44c1-b8af-edba65808eef';
 const ADMIN_URL = 'https://functions.poehali.dev/e54ef9c3-e374-44e2-85a9-a9e2d5845818';
 
-export const TELEGRAM_URL = 'https://t.me/';
+export const TELEGRAM_URL = 'https://t.me/plazmatorg';
 
 export interface User {
   id: number;
+  player_id: string;
   email: string;
   nickname: string;
   balance: number;
   xp: number;
   level: number;
+  level_name: string;
+  level_discount: number;
   vip_level: number;
   role: string;
   is_owner: boolean;
@@ -57,6 +60,11 @@ export const api = {
   minerCashout: (bet: number, mines: number, opened: number) =>
     req(GAME_URL, 'POST', { action: 'miner', bet, mines, opened, cashout: true }),
   minedrop: (bet: number) => req(GAME_URL, 'POST', { action: 'minedrop', bet }),
+  bjDeal: (bet: number) => req(GAME_URL, 'POST', { action: 'blackjack_deal', bet }),
+  bjHit: (bet: number, player: number[]) => req(GAME_URL, 'POST', { action: 'blackjack_hit', bet, player }),
+  bjStand: (bet: number, player: number[], dealer: number[]) => req(GAME_URL, 'POST', { action: 'blackjack_stand', bet, player, dealer }),
+  transfer: (to_player_id: string, amount: number) => req(GAME_URL, 'POST', { action: 'transfer', to_player_id, amount }),
+  levels: () => req(GAME_URL, 'GET', undefined, { action: 'levels' }),
 
   history: () => req(GAME_URL, 'GET', undefined, { action: 'history' }),
   leaderboard: () => req(GAME_URL, 'GET', undefined, { action: 'leaderboard' }),
@@ -73,6 +81,10 @@ export const api = {
     req(ADMIN_URL, 'POST', { action: 'set_role', user_id, role }),
   adminSetVip: (user_id: number, vip_level: number) =>
     req(ADMIN_URL, 'POST', { action: 'set_vip', user_id, vip_level }),
+  adminSubBalance: (user_id: number, amount: number) =>
+    req(ADMIN_URL, 'POST', { action: 'sub_balance', user_id, amount }),
+  adminSetBan: (user_id: number, banned: boolean) =>
+    req(ADMIN_URL, 'POST', { action: 'set_ban', user_id, banned }),
   adminCreateTournament: (title: string, description: string, prize_pool: number) =>
     req(ADMIN_URL, 'POST', { action: 'create_tournament', title, description, prize_pool }),
 };

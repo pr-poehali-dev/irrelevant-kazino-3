@@ -6,16 +6,18 @@ import MinerGame from '@/components/games/MinerGame';
 import CrashGame from '@/components/games/CrashGame';
 import CaseGame from '@/components/games/CaseGame';
 import MineDropGame from '@/components/games/MineDropGame';
+import BlackjackGame from '@/components/games/BlackjackGame';
 
 const GAMES = [
   { id: 'slot', name: '777 Слот', desc: 'Классический слот с джекпотами', icon: 'Cherry', tag: 'Хит', cat: 'Слоты' },
+  { id: 'blackjack', name: 'Блэкджек', desc: 'Набери 21 и побей дилера', icon: 'Spade', tag: 'Новинка', cat: 'Карты' },
   { id: 'miner', name: 'Минёр', desc: 'Открывай ячейки, избегай мин', icon: 'Bomb', tag: '', cat: 'Логика' },
   { id: 'crash', name: 'Crash', desc: 'Забери ставку до краха', icon: 'TrendingUp', tag: 'Live', cat: 'Краш' },
   { id: 'case', name: 'Кейсы', desc: 'Открывай кейсы с наградами', icon: 'Package', tag: '', cat: 'Кейсы' },
-  { id: 'minedrop', name: 'Mine Drop', desc: 'Роняй шар сквозь поле', icon: 'CircleDot', tag: 'Новинка', cat: 'Логика' },
+  { id: 'minedrop', name: 'Mine Drop', desc: 'Роняй шар сквозь поле', icon: 'CircleDot', tag: '', cat: 'Логика' },
 ];
 
-const CATS = ['Все', 'Слоты', 'Логика', 'Краш', 'Кейсы'];
+const CATS = ['Все', 'Слоты', 'Карты', 'Логика', 'Краш', 'Кейсы'];
 
 export default function GamesCatalog() {
   const [active, setActive] = useState<string | null>(null);
@@ -24,7 +26,7 @@ export default function GamesCatalog() {
 
   if (active) {
     const g = GAMES.find((x) => x.id === active)!;
-    const Game = { slot: SlotGame, miner: MinerGame, crash: CrashGame, case: CaseGame, minedrop: MineDropGame }[active]!;
+    const Game = { slot: SlotGame, blackjack: BlackjackGame, miner: MinerGame, crash: CrashGame, case: CaseGame, minedrop: MineDropGame }[active]!;
     return (
       <div className="max-w-2xl mx-auto">
         <button onClick={() => setActive(null)}
