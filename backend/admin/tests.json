@@ -1,0 +1,16 @@
+{
+  "tests": [
+    {
+      "name": "CORS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Access denied without token",
+      "method": "GET",
+      "path": "/?action=users",
+      "expectedStatus": 403
+    }
+  ]
+}

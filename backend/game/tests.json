@@ -1,0 +1,23 @@
+{
+  "tests": [
+    {
+      "name": "CORS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Stats without token",
+      "method": "GET",
+      "path": "/?action=stats",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Play without token",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "slot", "bet": 50},
+      "expectedStatus": 401
+    }
+  ]
+}
