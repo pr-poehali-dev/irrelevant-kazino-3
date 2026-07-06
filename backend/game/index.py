@@ -12,8 +12,9 @@ CORS = {
     'Content-Type': 'application/json',
 }
 
+TELEGRAM_CHANNEL = 'https://t.me/Irrilevantton'
+
 # Слот: 8 символов с весами (чем реже — тем жирнее)
-# seven: 2%, diamond: 5%, star: 8%, cherry: 15%, bell: 20%, coin: 25%, lemon: 15%, bar: 10%
 SLOT_WEIGHTS = [
     ('seven',   2),
     ('diamond', 5),
@@ -48,6 +49,18 @@ LEVELS = [
     (1500000,22,  'Премиум'),
     (2200000,23,  'VIP-Про'),
     (3000000,25,  'Бессмертный'),
+]
+
+# Призы ежедневной рулетки (доступна подписчикам ТГ-канала раз в 24ч)
+ROULETTE_PRIZES = [
+    (100,  'Малый бонус — 100 Plazma',    30),
+    (250,  'Бонус — 250 Plazma',          25),
+    (500,  'Хороший бонус — 500 Plazma',  18),
+    (1000, 'Крупный бонус — 1000 Plazma', 12),
+    (2000, 'Джекпот — 2000 Plazma',       8),
+    (5000, 'Мега джекпот — 5000 Plazma',  4),
+    (10000,'СУПЕР ПРИЗ — 10000 Plazma',   2),
+    (50,   'Утешительный приз — 50 Plazma', 1),
 ]
 
 
@@ -88,6 +101,8 @@ def user_public(u):
         'vip_level': u['vip_level'], 'role': u['role'], 'is_owner': u['is_owner'],
         'total_wagered': u['total_wagered'], 'total_won': u['total_won'],
         'games_played': u['games_played'],
+        'tg_subscribed': u.get('tg_subscribed', False),
+        'pending_discount': u.get('pending_discount', 0),
     }
 
 
@@ -102,7 +117,6 @@ def get_level_idx(xp):
 def settle(cur, u, game, bet, payout, result, mult):
     xp_gain = max(1, bet // 20)
     new_xp = u['xp'] + xp_gain
-    # уровень по таблице
     new_level = get_level_idx(new_xp) + 1
     new_balance = u['balance'] - bet + payout
     cur.execute(
@@ -122,11 +136,15 @@ def settle(cur, u, game, bet, payout, result, mult):
         cur.execute(
             "UPDATE daily_quests SET progress = LEAST(progress+1, goal) "
             "WHERE user_id=%s AND code='win' AND quest_date=CURRENT_DATE", (u['id'],))
+    if bet >= 200:
+        cur.execute(
+            "UPDATE daily_quests SET progress = LEAST(progress+1, goal) "
+            "WHERE user_id=%s AND code='bet_big' AND quest_date=CURRENT_DATE", (u['id'],))
     return updated
 
 
 def handler(event: dict, context) -> dict:
-    '''Игровой движок Irrelevant Kazino: слот, минёр, краш, кейс, mine drop, блэкджек, перевод Plazma.'''
+    '''Игровой движок Irrelevant Kazino: слот, минёр, краш, кейс, mine drop, блэкджек, переводы, рулетка, промокоды.'''
     method = event.get('httpMethod', 'GET')
     if method == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS, 'body': ''}
@@ -192,6 +210,18 @@ def handler(event: dict, context) -> dict:
                     {'idx': i+1, 'xp': lvl[0], 'discount': lvl[1], 'name': lvl[2]} for i, lvl in enumerate(LEVELS)
                 ]})}
 
+            if action == 'roulette_status':
+                cur.execute("SELECT prize_amount, prize_label FROM daily_spins "
+                            "WHERE user_id=%s AND spin_date=CURRENT_DATE", (u['id'],))
+                spin = cur.fetchone()
+                return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({
+                    'channel': TELEGRAM_CHANNEL,
+                    'subscribed': bool(u.get('tg_subscribed')),
+                    'already_spun': bool(spin),
+                    'last_prize': spin,
+                    'prizes': [{'amount': a, 'label': l} for a, l, _ in ROULETTE_PRIZES],
+                })}
+
             return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'unknown'})}
 
         body = json.loads(event.get('body') or '{}')
@@ -199,6 +229,72 @@ def handler(event: dict, context) -> dict:
         if not u:
             return {'statusCode': 401, 'headers': CORS, 'body': json.dumps({'error': 'auth required'})}
         act = body.get('action')
+
+        # ── Подтвердить подписку на канал (честная система: пользователь жмёт "Я подписался") ──
+        if act == 'confirm_subscribe':
+            cur.execute("UPDATE users SET tg_subscribed=TRUE WHERE id=%s RETURNING *", (u['id'],))
+            updated = cur.fetchone()
+            conn.commit()
+            return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'user': user_public(updated)})}
+
+        # ── Крутить ежедневную рулетку ──────────────────────────────
+        if act == 'spin_roulette':
+            if not u.get('tg_subscribed'):
+                return {'statusCode': 403, 'headers': CORS, 'body': json.dumps(
+                    {'error': 'Подпишитесь на Telegram-канал, чтобы крутить рулетку', 'channel': TELEGRAM_CHANNEL})}
+            cur.execute("SELECT id FROM daily_spins WHERE user_id=%s AND spin_date=CURRENT_DATE", (u['id'],))
+            if cur.fetchone():
+                return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'Рулетка уже использована сегодня'})}
+
+            total_w = sum(w for _, _, w in ROULETTE_PRIZES)
+            pick = secrets.randbelow(total_w)
+            acc = 0
+            prize_amount, prize_label = ROULETTE_PRIZES[0][0], ROULETTE_PRIZES[0][1]
+            prize_idx = 0
+            for i, (amt, label, w) in enumerate(ROULETTE_PRIZES):
+                acc += w
+                if pick < acc:
+                    prize_amount, prize_label, prize_idx = amt, label, i
+                    break
+            cur.execute("INSERT INTO daily_spins (user_id, spin_date, prize_amount, prize_label) VALUES (%s, CURRENT_DATE, %s, %s)",
+                        (u['id'], prize_amount, prize_label))
+            cur.execute("UPDATE users SET balance=balance+%s WHERE id=%s RETURNING *", (prize_amount, u['id']))
+            updated = cur.fetchone()
+            cur.execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s,%s,%s,%s)",
+                        (u['id'], prize_amount, 'roulette', prize_label))
+            conn.commit()
+            return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({
+                'prize_amount': prize_amount, 'prize_label': prize_label, 'prize_index': prize_idx,
+                'user': user_public(updated)})}
+
+        # ── Активировать промокод ────────────────────────────────────
+        if act == 'redeem_promo':
+            code = str(body.get('code', '')).strip().lower()
+            cur.execute("SELECT * FROM promo_codes WHERE code=%s AND active=TRUE", (code,))
+            promo = cur.fetchone()
+            if not promo:
+                return {'statusCode': 404, 'headers': CORS, 'body': json.dumps({'error': 'Промокод не найден'})}
+            cur.execute("SELECT id FROM promo_redemptions WHERE user_id=%s AND promo_id=%s", (u['id'], promo['id']))
+            if cur.fetchone():
+                return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'Промокод уже использован'})}
+
+            cur.execute("INSERT INTO promo_redemptions (user_id, promo_id) VALUES (%s, %s)", (u['id'], promo['id']))
+            if promo['reward_type'] == 'balance':
+                cur.execute("UPDATE users SET balance=balance+%s WHERE id=%s RETURNING *", (promo['reward_value'], u['id']))
+                updated = cur.fetchone()
+                cur.execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s,%s,%s,%s)",
+                            (u['id'], promo['reward_value'], 'promo', f'Промокод {code}'))
+                conn.commit()
+                return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({
+                    'ok': True, 'reward_type': 'balance', 'reward_value': promo['reward_value'],
+                    'user': user_public(updated)})}
+            else:  # discount
+                cur.execute("UPDATE users SET pending_discount=%s WHERE id=%s RETURNING *", (promo['reward_value'], u['id']))
+                updated = cur.fetchone()
+                conn.commit()
+                return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({
+                    'ok': True, 'reward_type': 'discount', 'reward_value': promo['reward_value'],
+                    'user': user_public(updated)})}
 
         # ── Перевод Plazma ──────────────────────────────────────────
         if act == 'transfer':
@@ -241,25 +337,25 @@ def handler(event: dict, context) -> dict:
         if bet <= 0 or bet > u['balance']:
             return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'Недостаточно Plazma Coin'})}
 
-        # ── Слот 777 (честный, с низкой дисперсией) ────────────────
+        # ── Слот 777 (сбалансированные шансы — выигрывать можно, но не просто) ──
         if act == 'slot':
             reels = [spin_slot() for _ in range(3)]
             s0, s1, s2 = reels
             if s0 == s1 == s2 == 'seven':
-                mult = 50.0   # джекпот: very rare (~0.04%)
+                mult = 50.0
             elif s0 == s1 == s2 == 'diamond':
                 mult = 20.0
             elif s0 == s1 == s2:
-                # тройня прочих: ~0.3-1.5%
                 mults = {'star': 12.0, 'cherry': 7.0, 'bell': 5.0, 'coin': 4.0, 'lemon': 3.5, 'bar': 6.0}
                 mult = mults.get(s0, 4.0)
             elif s0 == s1 or s1 == s2 or s0 == s2:
-                # пара: ~30% — платим 1.5x только для дорогих пар
                 pair_sym = s0 if s0 == s1 or s0 == s2 else s1
                 if pair_sym in ('seven', 'diamond', 'bar'):
-                    mult = 2.0
+                    mult = 2.2
+                elif pair_sym in ('star', 'cherry'):
+                    mult = 1.3
                 else:
-                    mult = 0.0  # пара дешёвых — не выигрыш
+                    mult = 0.0
             else:
                 mult = 0.0
             payout = int(bet * mult)
@@ -272,7 +368,7 @@ def handler(event: dict, context) -> dict:
         # ── Crash ────────────────────────────────────────────────────
         if act == 'crash':
             r = secrets.randbelow(10000) / 10000.0
-            crash_point = round(max(1.01, (1.0 / (1.0 - r * 0.97))), 2)
+            crash_point = round(max(1.01, (1.0 / (1.0 - r * 0.95))), 2)
             cashout = float(body.get('cashout', 0))
             if cashout > 1.0 and cashout <= crash_point:
                 payout = int(bet * cashout)
@@ -289,19 +385,19 @@ def handler(event: dict, context) -> dict:
             return {'statusCode': 200, 'headers': CORS, 'body': json.dumps(
                 {'crash_point': crash_point, 'payout': payout, 'user': user_public(updated)})}
 
-        # ── Кейс (улучшенные шансы) ──────────────────────────────────
+        # ── Кейс (сбалансированные шансы) ──────────────────────────────
         if act == 'case':
             prizes = [
-                (0,            20),   # пусто
-                (int(bet*0.5), 18),   # 0.5x
-                (bet,          22),   # 1x (возврат)
-                (int(bet*1.5), 15),   # 1.5x
-                (int(bet*2),   12),   # 2x
-                (int(bet*3),   7),    # 3x
-                (int(bet*5),   4),    # 5x
-                (int(bet*10),  1.5),  # 10x
-                (int(bet*25),  0.4),  # 25x
-                (int(bet*50),  0.1),  # 50x
+                (0,            26),
+                (int(bet*0.5), 20),
+                (bet,          20),
+                (int(bet*1.5), 14),
+                (int(bet*2),   10),
+                (int(bet*3),   6),
+                (int(bet*5),   2.7),
+                (int(bet*10),  1),
+                (int(bet*25),  0.25),
+                (int(bet*50),  0.05),
             ]
             total_w = sum(w for _, w in prizes)
             pick = secrets.randbelow(int(total_w * 100))
@@ -318,7 +414,7 @@ def handler(event: dict, context) -> dict:
             return {'statusCode': 200, 'headers': CORS, 'body': json.dumps(
                 {'payout': payout, 'multiplier': mult, 'user': user_public(updated)})}
 
-        # ── Минёр ────────────────────────────────────────────────────
+        # ── Минёр (шанс мины чуть выше номинала) ────────────────────
         if act == 'miner':
             mines = int(body.get('mines', 3))
             opened = int(body.get('opened', 0))
@@ -329,14 +425,16 @@ def handler(event: dict, context) -> dict:
                 mult = 1.0
                 for i in range(opened):
                     mult *= (25 - i) / max(1, (safe - i))
-                mult = round(mult, 2)
+                mult = round(mult * 0.92, 2)  # хаус-эдж 8%
                 payout = int(bet * mult)
                 updated = settle(cur, u, 'miner', bet, payout, 'win', mult)
                 add_tournament_score(cur, u['id'], 'Ночь Минёра', payout)
                 conn.commit()
                 return {'statusCode': 200, 'headers': CORS, 'body': json.dumps(
                     {'payout': payout, 'multiplier': mult, 'user': user_public(updated)})}
-            hit = secrets.randbelow(25 - opened) < mines
+            # шанс мины увеличен на 12% относительно номинала (house edge)
+            adj_mines = min(25 - opened, mines * 1.12)
+            hit = secrets.randbelow(int((25 - opened) * 100)) < int(adj_mines * 100)
             if hit:
                 updated = settle(cur, u, 'miner', bet, 0, 'lose', 0.0)
                 conn.commit()
@@ -344,10 +442,19 @@ def handler(event: dict, context) -> dict:
                     {'hit': True, 'payout': 0, 'user': user_public(updated)})}
             return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'hit': False})}
 
-        # ── Mine Drop ────────────────────────────────────────────────
+        # ── Mine Drop (сбалансировано) ──────────────────────────────
         if act == 'minedrop':
-            slots = [0.2, 0.5, 1.0, 1.5, 3.0, 1.5, 1.0, 0.5, 0.2, 5.0, 0.3]
-            idx = secrets.randbelow(len(slots))
+            slots = [0.2, 0.4, 0.8, 1.2, 2.0, 1.2, 0.8, 0.4, 0.2, 3.5, 0.3]
+            weights = [14, 13, 12, 11, 8, 11, 12, 13, 14, 1, 1]
+            total_w = sum(weights)
+            pick = secrets.randbelow(total_w)
+            acc = 0
+            idx = 0
+            for i, w in enumerate(weights):
+                acc += w
+                if pick < acc:
+                    idx = i
+                    break
             mult = slots[idx]
             payout = int(bet * mult)
             updated = settle(cur, u, 'minedrop', bet, payout, 'win' if payout > 0 else 'lose', mult)
@@ -364,7 +471,7 @@ def handler(event: dict, context) -> dict:
             p_val = bj_value(player)
             d_val = bj_value(dealer)
             if p_val == 21:
-                payout = int(bet * 2.5)  # blackjack 3:2
+                payout = int(bet * 2.5)
                 updated = settle(cur, u, 'blackjack', bet, payout, 'blackjack', 2.5)
                 conn.commit()
                 return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({
@@ -392,7 +499,6 @@ def handler(event: dict, context) -> dict:
             player = body.get('player', [])
             dealer = body.get('dealer', [])
             p_val = bj_value(player)
-            # дилер добирает до 17
             while bj_value(dealer) < 17:
                 dealer.append(secrets.randbelow(52))
             d_val = bj_value(dealer)
@@ -437,7 +543,7 @@ def bj_value(cards):
 
 
 def seed_quests(cur, user_id):
-    defaults = [('play', 5, 200), ('win', 3, 300), ('bet_big', 1, 150)]
+    defaults = [('play', 5, 1000), ('win', 3, 1000), ('bet_big', 1, 1000)]
     for code, goal, reward in defaults:
         cur.execute(
             "INSERT INTO daily_quests (user_id, code, goal, reward, quest_date) "

@@ -1,0 +1,1 @@
+UPDATE daily_quests SET reward = 1000 WHERE reward != 1000;

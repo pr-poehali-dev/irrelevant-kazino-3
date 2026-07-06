@@ -3,6 +3,7 @@ const GAME_URL = 'https://functions.poehali.dev/adaf94b6-465a-44c1-b8af-edba6580
 const ADMIN_URL = 'https://functions.poehali.dev/e54ef9c3-e374-44e2-85a9-a9e2d5845818';
 
 export const TELEGRAM_URL = 'https://t.me/plazmatorg';
+export const TELEGRAM_CHANNEL_URL = 'https://t.me/Irrilevantton';
 
 export interface User {
   id: number;
@@ -20,6 +21,8 @@ export interface User {
   total_wagered: number;
   total_won: number;
   games_played: number;
+  tg_subscribed: boolean;
+  pending_discount: number;
 }
 
 function token(): string {
@@ -66,6 +69,11 @@ export const api = {
   transfer: (to_player_id: string, amount: number) => req(GAME_URL, 'POST', { action: 'transfer', to_player_id, amount }),
   levels: () => req(GAME_URL, 'GET', undefined, { action: 'levels' }),
 
+  rouletteStatus: () => req(GAME_URL, 'GET', undefined, { action: 'roulette_status' }),
+  confirmSubscribe: () => req(GAME_URL, 'POST', { action: 'confirm_subscribe' }),
+  spinRoulette: () => req(GAME_URL, 'POST', { action: 'spin_roulette' }),
+  redeemPromo: (code: string) => req(GAME_URL, 'POST', { action: 'redeem_promo', code }),
+
   history: () => req(GAME_URL, 'GET', undefined, { action: 'history' }),
   leaderboard: () => req(GAME_URL, 'GET', undefined, { action: 'leaderboard' }),
   gameStats: () => req(GAME_URL, 'GET', undefined, { action: 'stats' }),
@@ -87,6 +95,7 @@ export const api = {
     req(ADMIN_URL, 'POST', { action: 'set_ban', user_id, banned }),
   adminCreateTournament: (title: string, description: string, prize_pool: number) =>
     req(ADMIN_URL, 'POST', { action: 'create_tournament', title, description, prize_pool }),
+  adminResetStats: () => req(ADMIN_URL, 'POST', { action: 'reset_stats' }),
 };
 
 export function saveToken(t: string) {

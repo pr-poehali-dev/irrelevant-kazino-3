@@ -151,6 +151,14 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'ok': True})}
 
+        if act == 'reset_stats':
+            if not admin['is_owner']:
+                return {'statusCode': 403, 'headers': CORS, 'body': json.dumps({'error': 'Только владелец может обнулить статистику'})}
+            cur.execute("UPDATE users SET total_wagered=0, total_won=0")
+            cur.execute("UPDATE game_history SET bet=0, payout=0")
+            conn.commit()
+            return {'statusCode': 200, 'headers': CORS, 'body': json.dumps({'ok': True})}
+
         return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'unknown action'})}
     finally:
         cur.close()

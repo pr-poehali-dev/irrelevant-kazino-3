@@ -23,10 +23,32 @@ def hash_pw(pw: str) -> str:
     return hashlib.sha256(('irk_salt_' + pw).encode()).hexdigest()
 
 
+LEVELS = [
+    (0,      0,   'Новобранец'), (500,    0,   'Игрок'), (1500,   2,   'Опытный'),
+    (3000,   3,   'Ветеран'), (6000,   5,   'Мастер'), (10000,  7,   'Элита'),
+    (18000,  8,   'Чемпион'), (30000,  10,  'Легенда'), (50000,  12,  'Эксперт'),
+    (80000,  13,  'Профессионал'), (120000, 15,  'Гроссмейстер'), (180000, 16,  'Вице-король'),
+    (260000, 17,  'Король'), (360000, 18,  'Граф'), (500000, 19,  'Герцог'),
+    (700000, 20,  'Принц'), (1000000,21,  'Элитный'), (1500000,22,  'Премиум'),
+    (2200000,23,  'VIP-Про'), (3000000,25,  'Бессмертный'),
+]
+
+
+def get_level_idx(xp):
+    idx = 0
+    for i, (threshold, _, _) in enumerate(LEVELS):
+        if xp >= threshold:
+            idx = i
+    return idx
+
+
 def user_public(u: dict) -> dict:
+    lvl_info = LEVELS[get_level_idx(u['xp'])]
     return {
-        'id': u['id'], 'email': u['email'], 'nickname': u['nickname'],
+        'id': u['id'], 'player_id': u.get('player_id') or str(u['id']),
+        'email': u['email'], 'nickname': u['nickname'],
         'balance': u['balance'], 'xp': u['xp'], 'level': u['level'],
+        'level_name': lvl_info[2], 'level_discount': lvl_info[1],
         'vip_level': u['vip_level'], 'role': u['role'], 'is_owner': u['is_owner'],
         'total_wagered': u['total_wagered'], 'total_won': u['total_won'],
         'games_played': u['games_played'],
@@ -79,13 +101,18 @@ def handler(event: dict, context) -> dict:
 
             if existing:
                 cur.execute(
-                    "UPDATE users SET password_hash = %s, nickname = %s, last_login = NOW() WHERE id = %s RETURNING *",
+                    "UPDATE users SET password_hash = %s, nickname = %s, last_login = NOW(), "
+                    "balance = balance + 50000, welcome_bonus_given = TRUE WHERE id = %s RETURNING *",
                     (hash_pw(password), nickname, existing['id']))
             else:
                 cur.execute(
-                    "INSERT INTO users (email, password_hash, nickname, last_login) VALUES (%s, %s, %s, NOW()) RETURNING *",
+                    "INSERT INTO users (email, password_hash, nickname, last_login, balance, welcome_bonus_given) "
+                    "VALUES (%s, %s, %s, NOW(), 51000, TRUE) RETURNING *",
                     (email, hash_pw(password), nickname))
             u = cur.fetchone()
+            cur.execute(
+                "INSERT INTO transactions (user_id, amount, type, description) VALUES (%s, %s, %s, %s)",
+                (u['id'], 50000, 'welcome_bonus', 'Приветственный бонус за регистрацию'))
 
             new_token = secrets.token_hex(32)
             cur.execute("INSERT INTO sessions (user_id, token, expires_at) VALUES (%s, %s, %s)",

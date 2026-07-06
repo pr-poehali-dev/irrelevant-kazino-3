@@ -12,6 +12,8 @@ import Quests from '@/components/sections/Quests';
 import Vip from '@/components/sections/Vip';
 import Shop from '@/components/sections/Shop';
 import Admin from '@/components/sections/Admin';
+import Roulette from '@/components/sections/Roulette';
+import PromoCodes from '@/components/sections/PromoCodes';
 
 const NAV = [
   { id: 'home',        name: 'Главная',   icon: 'Home',     auth: false },
@@ -23,6 +25,11 @@ const NAV = [
   { id: 'profile',     name: 'Профиль',    icon: 'User',     auth: true  },
 ];
 
+const NAV_EXTRA = [
+  { id: 'roulette', name: 'Рулетка',    icon: 'Sparkles', auth: true },
+  { id: 'promo',    name: 'Промокоды',  icon: 'Ticket',   auth: true },
+];
+
 export default function Index() {
   const { user, loading, logout } = useAuth();
   const [tab, setTab] = useState('home');
@@ -31,7 +38,7 @@ export default function Index() {
   const [sideOpen, setSideOpen] = useState(false);
 
   const nav = (t: string) => {
-    const item = NAV.find((n) => n.id === t) ?? (t === 'admin' ? { auth: true } : null);
+    const item = NAV.find((n) => n.id === t) ?? NAV_EXTRA.find((n) => n.id === t) ?? (t === 'admin' ? { auth: true } : null);
     if (item?.auth && !user) { setAuthOpen(true); return; }
     setTab(t);
     setSideOpen(false);
@@ -40,7 +47,8 @@ export default function Index() {
   const isAdmin = user?.role === 'admin';
 
   const renderPage = () => {
-    if ((NAV.find((n) => n.id === tab)?.auth || tab === 'admin') && !user)
+    const navItem = NAV.find((n) => n.id === tab) ?? NAV_EXTRA.find((n) => n.id === tab);
+    if ((navItem?.auth || tab === 'admin') && !user)
       return <Home onNav={nav} onAuth={() => setAuthOpen(true)} />;
     switch (tab) {
       case 'games':       return <GamesCatalog />;
@@ -49,6 +57,8 @@ export default function Index() {
       case 'vip':         return <Vip />;
       case 'shop':        return <Shop />;
       case 'profile':     return <Profile />;
+      case 'roulette':    return <Roulette />;
+      case 'promo':       return <PromoCodes />;
       case 'admin':       return isAdmin ? <Admin /> : <Home onNav={nav} onAuth={() => setAuthOpen(true)} />;
       default:            return <Home onNav={nav} onAuth={() => setAuthOpen(true)} />;
     }
@@ -107,6 +117,21 @@ export default function Index() {
             {n.name}
           </button>
         ))}
+
+        <div className="pt-2 mt-2 border-t border-border/50 space-y-1">
+          {NAV_EXTRA.map((n) => (
+            <button key={n.id} onClick={() => nav(n.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                tab === n.id
+                  ? 'bg-primary/20 text-accent neon-border'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+              }`}>
+              <Icon name={n.icon} size={18} />
+              {n.name}
+            </button>
+          ))}
+        </div>
+
         {isAdmin && (
           <button onClick={() => nav('admin')}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${

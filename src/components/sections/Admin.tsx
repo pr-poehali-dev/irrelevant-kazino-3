@@ -77,6 +77,13 @@ export default function Admin() {
     flash('Турнир создан');
   };
 
+  const resetStats = async () => {
+    if (!confirm('Обнулить статистику ставок, выплат и крупного выигрыша у всех игроков?')) return;
+    await api.adminResetStats();
+    flash('Статистика обнулена');
+    load(q);
+  };
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {msg && (
@@ -101,6 +108,17 @@ export default function Admin() {
               <div className="text-[10px] text-muted-foreground">{s.label}</div>
             </div>
           ))}
+        </div>
+      )}
+
+      {user?.is_owner && (
+        <div className="glass rounded-3xl p-4 flex items-center justify-between">
+          <div className="text-sm text-muted-foreground">
+            Обнулить «Ставок всего», «Выплат всего» и «Крупный выигрыш» у всех игроков
+          </div>
+          <Button size="sm" onClick={resetStats} className="bg-destructive/80 hover:bg-destructive whitespace-nowrap">
+            <Icon name="RotateCcw" size={14} className="mr-1" /> Обнулить статистику
+          </Button>
         </div>
       )}
 

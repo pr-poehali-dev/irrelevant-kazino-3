@@ -3,16 +3,15 @@ import Icon from '@/components/ui/icon';
 import { TELEGRAM_URL } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
-const PACKS = [
-  { amount: 1000,  price: '100 ₽',  bonus: '' },
-  { amount: 5500,  price: '500 ₽',  bonus: '+10%' },
-  { amount: 12000, price: '1000 ₽', bonus: '+20%' },
-  { amount: 30000, price: '2500 ₽', bonus: '+25%' },
-];
+// Курс: 100 ₽ = 1000 Plazma Coin
+const RATE = 10; // 1 Plazma = 10 копеек, т.е. 1000 Plazma = 100 ₽
+const PACKS = [1000, 5000, 10000, 50000, 100000];
 
 export default function Shop() {
   const { user } = useAuth();
-  const discount = user?.level_discount || 0;
+  const levelDiscount = user?.level_discount || 0;
+  const promoDiscount = user?.pending_discount || 0;
+  const discount = Math.min(90, levelDiscount + promoDiscount);
 
   return (
     <div className="max-w-4xl mx-auto space-y-4">
@@ -20,31 +19,32 @@ export default function Shop() {
         <Icon name="Zap" size={40} className="text-accent mx-auto mb-2" />
         <h2 className="font-display text-2xl font-bold">Купить Plazma Coin</h2>
         <p className="text-sm text-muted-foreground max-w-lg mx-auto mt-1">
-          Пополнение через Telegram-чат. Напишите оператору, укажите нужный пакет и оплатите — Plazma придёт на счёт.
+          Курс: <span className="text-accent font-semibold">100 ₽ = 1000 Plazma</span>. Пополнение через Telegram-чат —
+          напишите оператору, укажите пакет и оплатите, Plazma придёт на счёт.
         </p>
         {discount > 0 && (
           <div className="inline-flex items-center gap-2 mt-3 px-4 py-2 rounded-full bg-accent/15 text-accent text-sm font-semibold">
-            <Icon name="Star" size={14} /> Ваша скидка за уровень: {discount}% — цены ниже!
+            <Icon name="Star" size={14} /> Ваша скидка: {discount}%
+            {promoDiscount > 0 && <span className="text-primary">(вкл. промокод {promoDiscount}%)</span>}
           </div>
         )}
       </div>
 
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {PACKS.map((p) => {
-          const bonusAmount = Math.floor(p.amount * discount / 100);
-          const total = p.amount + bonusAmount;
+      <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        {PACKS.map((amount) => {
+          const basePrice = amount / RATE; // в рублях
+          const finalPrice = Math.round(basePrice * (1 - discount / 100));
           return (
-            <div key={p.amount} className="glass rounded-3xl p-5 text-center neon-cyan flex flex-col">
+            <div key={amount} className="glass rounded-3xl p-5 text-center neon-cyan flex flex-col">
               <div className="text-3xl mb-1">💎</div>
-              <div className="font-display text-2xl font-bold text-accent">{total.toLocaleString()}</div>
-              <div className="text-xs text-muted-foreground mb-1">Plazma Coin</div>
-              {(p.bonus || discount > 0) && (
-                <div className="text-xs text-primary mb-1">
-                  {p.bonus && <span>{p.bonus} </span>}
-                  {discount > 0 && <span>+{discount}% за уровень</span>}
-                </div>
-              )}
-              <div className="font-semibold mb-3 mt-auto">{p.price}</div>
+              <div className="font-display text-2xl font-bold text-accent">{amount.toLocaleString()}</div>
+              <div className="text-xs text-muted-foreground mb-2">Plazma Coin</div>
+              <div className="mt-auto mb-3">
+                {discount > 0 && (
+                  <div className="text-xs text-muted-foreground line-through">{basePrice.toLocaleString()} ₽</div>
+                )}
+                <div className="font-display font-bold text-lg">{finalPrice.toLocaleString()} ₽</div>
+              </div>
               <Button
                 className="w-full bg-primary hover:bg-primary/90 rounded-xl"
                 onClick={() => window.open(TELEGRAM_URL, '_blank')}
